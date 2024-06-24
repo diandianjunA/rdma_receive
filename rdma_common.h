@@ -20,7 +20,7 @@
 
 
 #define MEM_RANGE_LEN (4096)		     /* DOCA mmap memory range length */
-#define INVENTORY_NUM_INITIAL_ELEMENTS (16)  /* Number of DOCA inventory initial elements */
+#define INVENTORY_NUM_INITIAL_ELEMENTS (100)  /* Number of DOCA inventory initial elements */
 #define MAX_USER_ARG_SIZE (256)		     /* Maximum size of user input argument */
 #define MAX_ARG_SIZE (MAX_USER_ARG_SIZE + 1) /* Maximum size of input argument */
 #define DEFAULT_STRING "Hi DOCA RDMA!"	     /* Default string to use in our samples */
@@ -30,7 +30,7 @@
 #define DEFAULT_REMOTE_CONNECTION_DESC_PATH "/tmp/send_local_connection_desc_path.txt"
 /* Default path to read/save the remote mmap connection descriptor that should be passed to the other side */
 #define DEFAULT_REMOTE_RESOURCE_CONNECTION_DESC_PATH "/tmp/read_respond_remote_resource_desc_path.txt"
-#define NUM_RDMA_TASKS (1)	   /* Number of RDMA tasks*/
+#define NUM_RDMA_TASKS (100)	   /* Number of RDMA tasks*/
 #define SLEEP_IN_NANOS (10 * 1000) /* Sample the task every 10 microseconds  */
 
 /* Function to check if a given device is capable of executing some task */
@@ -62,8 +62,10 @@ struct rdma_resources {
     size_t mmap_descriptor_size;		      /* DOCA memory map descriptor size */
     struct doca_rdma *rdma;			      /* DOCA RDMA instance */
     struct doca_ctx *rdma_ctx;		      /* DOCA context to be used with DOCA RDMA */
-    struct doca_buf *src_buf;		      /* DOCA source buffer */
-    struct doca_buf *dst_buf;		      /* DOCA destination buffer */
+    struct doca_buf *src_buf[100];		      /* DOCA source buffer */
+    struct doca_buf *dst_buf[100];		      /* DOCA destination buffer */
+    int submit_index;
+    int completion_index;
     const void *rdma_conn_descriptor;	      /* DOCA RDMA connection descriptor */
     size_t rdma_conn_descriptor_size;	      /* DOCA RDMA connection descriptor size */
     void *remote_rdma_conn_descriptor;	      /* DOCA RDMA remote connection descriptor */

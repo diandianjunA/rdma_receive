@@ -4,6 +4,8 @@
 
 #include "rdma_receive_dep.h"
 
+std::chrono::nanoseconds start(0);
+std::chrono::nanoseconds duration(0);
 
 DOCA_LOG_REGISTER(RDMA_RECEIVE::SAMPLE);
 
@@ -44,7 +46,9 @@ void rdma_receive_completed_callback(struct doca_rdma_task_receive *rdma_receive
 {
     std::chrono::nanoseconds end(0);
     end = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-    std::cout << "end: " << end.count() << std::endl;
+    duration += end - start;
+    DOCA_LOG_INFO("RDMA read task was done Successfully, duration: %ld", duration.count());
+
     struct rdma_resources *resources = (struct rdma_resources *)ctx_user_data.ptr;
     void *dst_buf_data;
     doca_error_t *first_encountered_error = (doca_error_t *)task_user_data.ptr;
@@ -53,7 +57,7 @@ void rdma_receive_completed_callback(struct doca_rdma_task_receive *rdma_receive
     DOCA_LOG_INFO("RDMA receive task was done Successfully");
 
     /* Read the data that was received */
-    result = doca_buf_get_data(resources->dst_buf, &dst_buf_data);
+    result = doca_buf_get_data(resources->dst_buf[resources->completion_index], &dst_buf_data);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to get destination buffer data: %s", doca_error_get_descr(result));
         goto free_task;
@@ -70,7 +74,7 @@ void rdma_receive_completed_callback(struct doca_rdma_task_receive *rdma_receive
 
     free_task:
     doca_task_free(doca_rdma_task_receive_as_task(rdma_receive_task));
-    tmp_result = doca_buf_dec_refcount(resources->dst_buf, NULL);
+    tmp_result = doca_buf_dec_refcount(resources->dst_buf[resources->completion_index], NULL);
     if (tmp_result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to decrease dst_buf count: %s", doca_error_get_descr(tmp_result));
         DOCA_ERROR_PROPAGATE(result, tmp_result);
@@ -83,6 +87,7 @@ void rdma_receive_completed_callback(struct doca_rdma_task_receive *rdma_receive
     /* Stop context once all tasks are completed */
     if (resources->num_remaining_tasks == 0)
         (void)doca_ctx_stop(resources->rdma_ctx);
+    resources->completion_index++;
 }
 
 void rdma_receive_error_callback(struct doca_rdma_task_receive *rdma_receive_task,
@@ -100,7 +105,7 @@ void rdma_receive_error_callback(struct doca_rdma_task_receive *rdma_receive_tas
     DOCA_LOG_ERR("RDMA receive task failed: %s", doca_error_get_descr(result));
 
     doca_task_free(task);
-    result = doca_buf_dec_refcount(resources->dst_buf, NULL);
+    result = doca_buf_dec_refcount(resources->dst_buf[resources->completion_index], NULL);
     if (result != DOCA_SUCCESS)
         DOCA_LOG_ERR("Failed to decrease dst_buf count: %s", doca_error_get_descr(result));
 
@@ -108,6 +113,7 @@ void rdma_receive_error_callback(struct doca_rdma_task_receive *rdma_receive_tas
     /* Stop context once all tasks are completed */
     if (resources->num_remaining_tasks == 0)
         (void)doca_ctx_stop(resources->rdma_ctx);
+    resources->completion_index++;
 }
 
 doca_error_t rdma_receive_export_and_connect(struct rdma_resources *resources)
@@ -154,7 +160,7 @@ doca_error_t rdma_receive_prepare_and_submit_task(struct rdma_resources *resourc
                                                 resources->mmap,
                                                 resources->mmap_memrange,
                                                 MAX_BUFF_SIZE,
-                                                &resources->dst_buf);
+                                                &resources->dst_buf[resources->submit_index]);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to allocate DOCA buffer to DOCA buffer inventory: %s",
                      doca_error_get_descr(result));
@@ -165,7 +171,7 @@ doca_error_t rdma_receive_prepare_and_submit_task(struct rdma_resources *resourc
     task_user_data.ptr = &(resources->first_encountered_error);
     /* Allocate and construct RDMA receive task */
     result = doca_rdma_task_receive_allocate_init(resources->rdma,
-                                                  resources->dst_buf,
+                                                  resources->dst_buf[resources->submit_index],
                                                   task_user_data,
                                                   &rdma_receive_task);
     if (result != DOCA_SUCCESS) {
@@ -182,13 +188,12 @@ doca_error_t rdma_receive_prepare_and_submit_task(struct rdma_resources *resourc
         goto free_task;
     }
     start = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-    std::cout << "start: " << start.count() << std::endl;
     return result;
 
     free_task:
     doca_task_free(doca_rdma_task_receive_as_task(rdma_receive_task));
     destroy_dst_buf:
-    tmp_result = doca_buf_dec_refcount(resources->dst_buf, NULL);
+    tmp_result = doca_buf_dec_refcount(resources->dst_buf[resources->submit_index], NULL);
     if (tmp_result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed to decrease dst_buf count: %s", doca_error_get_descr(tmp_result));
         DOCA_ERROR_PROPAGATE(result, tmp_result);
@@ -219,10 +224,12 @@ void rdma_receive_state_change_callback(const union doca_data user_data,
             break;
         case DOCA_CTX_STATE_RUNNING:
             DOCA_LOG_INFO("RDMA context is running");
-
-            result = rdma_receive_prepare_and_submit_task(resources);
-            if (result != DOCA_SUCCESS)
-                DOCA_LOG_ERR("rdma_receive_prepare_and_submit_task() failed: %s", doca_error_get_descr(result));
+            for (int i = 0; i < 100; i++) {
+                resources->submit_index = i;
+                result = rdma_receive_prepare_and_submit_task(resources);
+                if (result != DOCA_SUCCESS)
+                    DOCA_LOG_ERR("rdma_read_prepare_and_submit_task() failed: %s", doca_error_get_descr(result));
+            }
             break;
         case DOCA_CTX_STATE_STOPPING:
             /**
