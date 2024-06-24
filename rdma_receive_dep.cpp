@@ -153,7 +153,6 @@ doca_error_t rdma_receive_prepare_and_submit_task(struct rdma_resources *resourc
     struct doca_rdma_task_receive *rdma_receive_task = NULL;
     union doca_data task_user_data = {0};
     doca_error_t result, tmp_result;
-    std::chrono::nanoseconds start(0);
 
     /* Add dst buffer to DOCA buffer inventory */
     result = doca_buf_inventory_buf_get_by_addr(resources->buf_inventory,
